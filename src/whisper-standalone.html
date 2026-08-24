@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本地 faster-whisper 中英混合识别测试</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: #101317; color: #edf2f7; }
+    main { width: min(780px, calc(100% - 32px)); margin: 36px auto; }
+    h1 { margin-bottom: 8px; font-size: 28px; }
+    p { color: #aeb9c6; line-height: 1.7; }
+    .card { margin-top: 20px; padding: 20px; border: 1px solid #303946; border-radius: 14px; background: #181d24; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+    button { padding: 10px 16px; border: 0; border-radius: 9px; font: inherit; font-weight: 650; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    #load { background: #3b82f6; color: white; }
+    #start { background: #22c55e; color: #07140b; }
+    #stop { background: #ef4444; color: white; }
+    .label { margin-top: 18px; color: #92a2b5; font-size: 13px; }
+    .output { min-height: 44px; margin-top: 6px; padding: 12px; border-radius: 8px; background: #0d1117; white-space: pre-wrap; }
+    #status[data-error="true"] { color: #fca5a5; }
+    #log { max-height: 260px; overflow: auto; font: 12px/1.55 ui-monospace, Consolas, monospace; color: #b9c6d5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>本地 faster-whisper 中英混合识别测试</h1>
+    <p>浏览器只负责录音；音频只发给本机 Python 的 faster-whisper。建议朗读：“今天我们 test 一下 DeepSeek Harness 的 voice plugin。”</p>
+    <section class="card">
+      <div class="buttons">
+        <button id="load" type="button">1. 检查本地引擎</button>
+        <button id="start" type="button" disabled>2. 开始录音</button>
+        <button id="stop" type="button" disabled>3. 停止并转写</button>
+      </div>
+      <div class="label">状态</div>
+      <div id="status" class="output">等待检查本地引擎</div>
+      <div class="label">最终文字</div>
+      <div id="final" class="output">—</div>
+      <div class="label">自动检测语言</div>
+      <div id="language" class="output">—</div>
+      <div class="label">本地处理日志</div>
+      <div id="log" class="output"></div>
+    </section>
+  </main>
+  <script>
+    (function () {
+      'use strict';
+      var HEALTH_URL = '/plugins/dsh-web-voice/health';
+      var STT_URL = '/plugins/dsh-web-voice/whisper-stt';
+      var loadButton = document.getElementById('load');
+      var startButton = document.getElementById('start');
+      var stopButton = document.getElementById('stop');
+      var statusNode = document.getElementById('status');
+      var finalNode = document.getElementById('final');
+      var languageNode = document.getElementById('language');
+      var logNode = document.getElementById('log');
+      var engineReady = false;
+      var session = null;
+
+      function setStatus(text, isError) {
+        statusNode.textContent = text;
+        statusNode.setAttribute('data-error', isError ? 'true' : 'false');
+      }
+      function log(text) {
+        logNode.textContent += '[' + new Date().toLocaleTimeString() + '] ' + text + '\n';
+        logNode.scrollTop = logNode.scrollHeight;
+      }
+      function messageText(error) {
+        return error && (error.error || error.message) || String(error || '未知错误');
+      }
+      function downsampleTo16k(input, inputRate) {
+        if (inputRate === 16000) return new Float32Array(input);
+        var ratio = inputRate / 16000;
+        var length = Math.max(1, Math.floor(input.length / ratio));
+        var output = new Float32Array(length);
+        for (var outputIndex = 0; outputIndex < length; outputIndex += 1) {
+          var start = Math.floor(outputIndex * ratio);
+          var end = Math.min(input.length, Math.floor((outputIndex + 1) * ratio));
+          var sum = 0;
+          for (var inputIndex = start; inputIndex < end; inputIndex += 1) sum += input[inputIndex];
+          output[outputIndex] = end > start ? sum / (end - start) : input[start] || 0;
+        }
+        return output;
+      }
+      function floatChunksToPcm16(chunks) {
+        var length = chunks.reduce(function (total, chunk) { return total + chunk.length; }, 0);
+        var pcm = new Int16Array(length);
+        var offset = 0;
+        chunks.forEach(function (chunk) {
+          for (var index = 0; index < chunk.length; index += 1) {
+            var sample = Math.max(-1, Math.min(1, chunk[index]));
+            pcm[offset++] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          }
+        });
+        return pcm;
+      }
+      async function checkEngine() {
+        loadButton.disabled = true;
+        setStatus('正在检查本地 faster-whisper…');
+        try {
+          var response = await fetch(HEALTH_URL, { cache: 'no-store' });
+          var health = await response.json();
+          if (!response.ok || !health.fasterWhisperBridge || !health.fasterWhisperPython || !health.fasterWhisperModel) {
+            throw new Error('本地 Python、模型或桥接脚本未就绪');
+          }
+          engineReady = true;
+          startButton.disabled = false;
+          setStatus('本地 faster-whisper 已就绪，可以开始录音');
+          log('引擎检查通过：Python=true，模型=true，桥接=true');
+        } catch (error) {
+          loadButton.disabled = false;
+          setStatus('本地引擎检查失败：' + messageText(error), true);
+          log('HEALTH ERROR: ' + messageText(error));
+        }
+      }
+      function stopCapture(active) {
+        active.processor.onaudioprocess = null;
+        try { active.processor.disconnect(); } catch (_error) {}
+        try { active.source.disconnect(); } catch (_error) {}
+        try { active.gain.disconnect(); } catch (_error) {}
+        active.stream.getTracks().forEach(function (track) { track.stop(); });
+      }
+      async function startRecording() {
+        if (!engineReady || session) return;
+        startButton.disabled = true;
+        finalNode.textContent = '—';
+        languageNode.textContent = '—';
+        setStatus('正在申请麦克风…');
+        try {
+          var stream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+          });
+          var AudioContextImpl = window.AudioContext || window.webkitAudioContext;
+          var audioContext = new AudioContextImpl();
+          var active = {
+            stream: stream, audioContext: audioContext, pcmChunks: [], callbacks: 0,
+            processor: null, source: null, gain: null
+          };
+          session = active;
+          active.processor = audioContext.createScriptProcessor(4096, 1, 1);
+          active.processor.onaudioprocess = function (event) {
+            active.callbacks += 1;
+            active.pcmChunks.push(downsampleTo16k(event.inputBuffer.getChannelData(0), audioContext.sampleRate));
+          };
+          active.source = audioContext.createMediaStreamSource(stream);
+          active.gain = audioContext.createGain();
+          active.gain.gain.value = 0;
+          active.source.connect(active.processor);
+          active.processor.connect(active.gain);
+          active.gain.connect(audioContext.destination);
+          stopButton.disabled = false;
+          setStatus('正在录音；说完后点击“停止并转写”');
+          log('开始录音：输入 ' + audioContext.sampleRate + ' Hz，实时降采样到 16000 Hz');
+        } catch (error) {
+          session = null;
+          startButton.disabled = false;
+          setStatus('录音启动失败：' + messageText(error), true);
+          log('START ERROR: ' + messageText(error));
+        }
+      }
+      async function stopAndTranscribe() {
+        var active = session;
+        if (!active) return;
+        session = null;
+        stopButton.disabled = true;
+        stopCapture(active);
+        try { await active.audioContext.close(); } catch (_error) {}
+        var pcm = floatChunksToPcm16(active.pcmChunks);
+        log('录音结束：' + active.callbacks + ' 块，PCM=' + pcm.byteLength + ' 字节');
+        if (pcm.byteLength < 3200) {
+          setStatus('录音太短，请至少说话一秒', true);
+          startButton.disabled = false;
+          return;
+        }
+        setStatus('本机 faster-whisper 正在转写；首次会加载模型…');
+        try {
+          var response = await fetch(STT_URL, {
+            method: 'POST',
+            headers: { 'content-type': 'application/octet-stream' },
+            body: pcm.buffer
+          });
+          var result = await response.json();
+          if (!response.ok) throw new Error(result.error || '本地转写失败');
+          finalNode.textContent = result.text || '（模型返回空文字）';
+          var confidence = Math.round((Number(result.languageProbability) || 0) * 100);
+          languageNode.textContent = result.language ? result.language + '（置信度 ' + confidence + '%）' : '未检测到';
+          setStatus(result.text ? '测试成功：本地 faster-whisper 返回了文字' : '已完成转写，但没有识别出文字', !result.text);
+          log('RESULT: ' + (result.text || '<empty>'));
+        } catch (error) {
+          setStatus('本地转写失败：' + messageText(error), true);
+          log('STT ERROR: ' + messageText(error));
+        } finally {
+          startButton.disabled = false;
+        }
+      }
+      loadButton.addEventListener('click', checkEngine);
+      startButton.addEventListener('click', startRecording);
+      stopButton.addEventListener('click', stopAndTranscribe);
+    })();
+  </script>
+</body>
+</html>

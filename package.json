@@ -1,0 +1,11 @@
+{
+  "name": "deepseek-harness-voice-plugin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

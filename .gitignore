@@ -1,0 +1,34 @@
+# node dependencies
+node_modules/
+
+# Python bytecode / cache
+__pycache__/
+*.pyc
+
+# runtime model / generated assets (large binaries, not source)
+model/
+vosk.js
+faster-whisper-model/
+faster-whisper-venv/
+*.mp3
+*.wav
+
+# local ops/test scripts that hard-code machine paths (D:\Agent\...) — not published
+tests/check_live_voice.ps1
+tests/restart_dsh_voice.ps1
+tests/run_edge_tts_smoke.ps1
+tests/edge_tts_smoke_input.json
+
+# logs
+*.log
+
+# internal design/plan notes (agentic dev, GBK-encoded) — not published
+docs/superpowers/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/

@@ -1,0 +1,44 @@
+[data-dsh-edge-mic],
+[data-dsh-edge-read] {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 30px;
+  padding: 0 6px;
+}
+
+[data-dsh-edge-mic]:hover,
+[data-dsh-edge-read]:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.14));
+}
+
+[data-dsh-edge-mic][data-state="recording"],
+[data-dsh-edge-read][data-state="playing"] {
+  background: var(--dsw-alias-button-info-fill, #4d6bfe);
+  color: #fff;
+}
+
+[data-dsh-edge-mic][data-state="loading"],
+[data-dsh-edge-read][data-state="loading"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+[data-dsh-edge-status] {
+  color: var(--dsw-alias-label-tertiary, #8b8d98);
+  display: block;
+  font-size: 12px;
+  margin: 4px 10px 0;
+}
+
+[data-dsh-edge-status][data-error="true"] {
+  color: var(--dsw-alias-state-error-primary, #f25a5a);
+}
