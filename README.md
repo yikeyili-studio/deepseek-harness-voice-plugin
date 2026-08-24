@@ -1,5 +1,8 @@
 # deepseek-harness-voice-plugin
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Made by yikeyili-studio](https://img.shields.io/badge/org-yikeyili--studio-2962FF.svg)](https://github.com/yikeyili-studio)
+
 A **voice input + read-aloud (TTS)** plugin for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) **web GUI**. It adds a microphone button beside the composer and a per-assistant-message speaker button, giving the web UI a ChatGPT‑style voice experience.
 
 Compatible with DSH Web (port 3080). MIT-licensed.
